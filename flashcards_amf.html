@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flashcards Révision AMF</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start; /* Align to top */
+            min-height: 100vh;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+            color: #333;
+        }
+        .container {
+            background-color: white;
+            padding: 25px 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 750px;
+            text-align: center;
+            margin-top: 20px; /* Add some margin at the top */
+        }
+        h1 {
+            color: #1a2b4d;
+            margin-bottom: 25px;
+            font-size: 1.8em;
+        }
+        #flashcard {
+            border: 1px solid #e0e0e0;
+            padding: 25px;
+            margin-top: 20px;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+            min-height: 220px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        #question-id {
+            font-size: 0.9em;
+            color: #666;
+            text-align: left;
+            margin-bottom: 5px;
+        }
+        #question {
+            font-size: 1.15em;
+            margin-bottom: 20px;
+            color: #333;
+            text-align: left;
+            line-height: 1.5;
+        }
+        .choices button {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            margin: 10px 0;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.95em;
+            transition: background-color 0.2s ease-in-out, transform 0.1s ease;
+            text-align: left;
+        }
+        .choices button:hover {
+            background-color: #0056b3;
+            transform: translateY(-1px);
+        }
+        .choices button:active {
+            transform: translateY(0px);
+        }
+        .choices button.correct {
+            background-color: #28a745 !important; /* Utiliser !important pour s'assurer que cela prime */
+            color: white !important;
+        }
+        .choices button.incorrect {
+            background-color: #dc3545 !important; /* Utiliser !important */
+            color: white !important;
+        }
+        .choices button.revealed-correct { /* Style pour la bonne réponse quand on clique "Voir Réponse" ou qu'on se trompe */
+            border: 2px solid #28a745;
+            background-color: #e9f7ef; /* Un fond clair pour la bonne réponse */
+            color: #28a745;
+        }
+        .choices button.disabled { /* Pour désactiver les boutons après une réponse */
+            pointer-events: none;
+            opacity: 0.8;
+        }
+        #feedback {
+            margin-top: 18px;
+            font-weight: bold;
+            min-height: 24px;
+            font-size: 1.05em;
+        }
+        #feedback.correct-feedback {
+            color: #28a745;
+        }
+        #feedback.incorrect-feedback {
+            color: #dc3545;
+        }
+        #navigation {
+            margin-top: 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        #navigation button {
+            padding: 10px 18px;
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.95em;
+            margin-top: 10px;
+        }
+        #navigation button:hover {
+            background-color: #545b62;
+        }
+        #progress-stats-container {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-top: 15px;
+            font-size: 0.9em;
+            color: #555;
+        }
+        #progress, #stats {
+           margin: 5px 10px;
+        }
+        #show-answer {
+            background-color: #ffc107;
+            color: #212529;
+        }
+         #show-answer:hover {
+            background-color: #e0a800;
+        }
+        .hidden { /* Pour cacher des éléments initialement */
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Flashcards Révision AMF</h1>
+
+        <div id="flashcard-container" class="hidden"> {/* Initialement caché jusqu'à ce que les questions soient chargées */}
+            <div id="flashcard">
+                <div>
+                    <div id="question-id"></div>
+                    <div id="question"></div>
+                </div>
+                <div class="choices">
+                    <button id="choiceA" data-choice="A"></button>
+                    <button id="choiceB" data-choice="B"></button>
+                    <button id="choiceC" data-choice="C"></button>
+                </div>
+            </div>
+            <div id="feedback"></div>
+            <div id="navigation">
+                <button id="prev-question">Précédente</button>
+                <button id="show-answer">Voir Réponse</button>
+                <button id="next-question">Suivante</button>
+            </div>
+             <div id="progress-stats-container">
+                <div id="progress"></div>
+                <div id="stats">Score: 0 / 0</div>
+            </div>
+        </div>
+        <div id="loading-message">Chargement des questions...</div>
+    </div>
+
+    <script>
+        let questions = [];
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let questionsAnsweredThisSession = 0;
+        let answeredCurrentQuestion = false;
+
+        const flashcardContainerEl = document.getElementById('flashcard-container');
+        const questionIdEl = document.getElementById('question-id');
+        const questionEl = document.getElementById('question');
+        const choiceAButton = document.getElementById('choiceA');
+        const choiceBButton = document.getElementById('choiceB');
+        const choiceCButton = document.getElementById('choiceC');
+        const feedbackEl = document.getElementById('feedback');
+        const nextButton = document.getElementById('next-question');
+        const prevButton = document.getElementById('prev-question');
+        const showAnswerButton = document.getElementById('show-answer');
+        const progressEl = document.getElementById('progress');
+        const statsEl = document.getElementById('stats');
+        const loadingMessageEl = document.getElementById('loading-message');
+
+        const choiceButtons = [choiceAButton, choiceBButton, choiceCButton];
+
+        async function loadQuestions() {
+            try {
+                const response = await fetch('questions_amf.json'); // Assurez-vous que le chemin est correct
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP ! Statut: ${response.status}`);
+                }
+                const jsonData = await response.json();
+                questions = jsonData;
+
+                if (questions && questions.length > 0) {
+                    loadingMessageEl.classList.add('hidden');
+                    flashcardContainerEl.classList.remove('hidden');
+                    shuffleArray(questions);
+                    displayQuestion();
+                } else {
+                    loadingMessageEl.textContent = "Aucune question trouvée dans le fichier JSON.";
+                }
+            } catch (error) {
+                console.error("Erreur lors du chargement du fichier JSON:", error);
+                loadingMessageEl.textContent = "Erreur lors du chargement des questions. Vérifiez la console et que le fichier 'questions_amf.json' est au bon endroit.";
+            }
+        }
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        function displayQuestion() {
+            answeredCurrentQuestion = false;
+            const q = questions[currentQuestionIndex];
+            questionIdEl.textContent = `Question n° ${q.id}`;
+            questionEl.textContent = q.question;
+            choiceAButton.innerHTML = `A) ${q.choices.A}`; // Utiliser innerHTML pour interpréter les balises si besoin
+            choiceBButton.innerHTML = `B) ${q.choices.B}`;
+            choiceCButton.innerHTML = `C) ${q.choices.C}`;
+
+            feedbackEl.textContent = "";
+            feedbackEl.className = 'feedback';
+
+            choiceButtons.forEach(button => {
+                button.className = ''; // Reset classes
+                button.classList.remove('disabled');
+            });
+            
+            nextButton.textContent = "Suivante";
+            showAnswerButton.style.display = 'inline-block'; // S'assurer qu'il est visible
+            updateProgressAndStats();
+
+            // Gérer l'état des boutons de navigation
+            prevButton.disabled = currentQuestionIndex === 0;
+            if (currentQuestionIndex === questions.length -1) {
+                nextButton.textContent = "Voir le score final";
+            }
+        }
+
+        function checkAnswer(selectedChoice) {
+            if (answeredCurrentQuestion) return;
+            answeredCurrentQuestion = true;
+            questionsAnsweredThisSession++;
+            showAnswerButton.style.display = 'none';
+
+            const correctAnswer = questions[currentQuestionIndex].correctAnswer;
+            const correctButton = document.querySelector(`.choices button[data-choice="${correctAnswer}"]`);
+            const selectedButton = document.querySelector(`.choices button[data-choice="${selectedChoice}"]`);
+
+            choiceButtons.forEach(button => {
+                button.classList.add('disabled');
+            });
+
+            if (selectedChoice === correctAnswer) {
+                feedbackEl.textContent = "Bonne réponse !";
+                feedbackEl.className = 'feedback correct-feedback';
+                selectedButton.classList.add('correct');
+                score++;
+            } else {
+                feedbackEl.textContent = `Mauvaise réponse. La bonne réponse était ${correctAnswer}.`;
+                feedbackEl.className = 'feedback incorrect-feedback';
+                if (selectedButton) selectedButton.classList.add('incorrect'); // Vérifier que selectedButton existe
+                if (correctButton) correctButton.classList.add('revealed-correct');
+            }
+            updateProgressAndStats();
+             if (currentQuestionIndex === questions.length - 1) {
+                nextButton.textContent = "Voir le score final";
+            }
+        }
+
+        function revealAnswer() {
+            if (answeredCurrentQuestion) return;
+            answeredCurrentQuestion = true;
+            showAnswerButton.style.display = 'none';
+
+            const correctAnswer = questions[currentQuestionIndex].correctAnswer;
+            const correctButton = document.querySelector(`.choices button[data-choice="${correctAnswer}"]`);
+
+            if (correctButton) {
+                correctButton.classList.add('revealed-correct');
+            }
+            feedbackEl.textContent = `La bonne réponse est ${correctAnswer}.`;
+            feedbackEl.className = 'feedback';
+
+            choiceButtons.forEach(button => {
+                button.classList.add('disabled');
+            });
+
+            if (currentQuestionIndex === questions.length - 1) {
+                nextButton.textContent = "Voir le score final";
+            }
+        }
+
+        function nextQuestion() {
+            if (currentQuestionIndex < questions.length - 1) {
+                currentQuestionIndex++;
+                displayQuestion();
+            } else {
+                flashcardContainerEl.innerHTML = `
+                    <h1>Session Terminée !</h1>
+                    <p>Votre score : ${score} / ${questions.length} (${((score/questions.length)*100).toFixed(1)}%)</p>
+                    <button onclick="restartQuiz()">Recommencer une nouvelle session</button>
+                `;
+            }
+        }
+
+        function prevQuestion() {
+            if (currentQuestionIndex > 0) {
+                currentQuestionIndex--;
+                displayQuestion();
+            }
+        }
+        
+        function restartQuiz() {
+            // Pour redémarrer, on peut simplement recharger la page.
+            // Cela réinitialisera toutes les variables et relancera loadQuestions.
+            window.location.reload();
+        }
+
+        function updateProgressAndStats() {
+            progressEl.textContent = `Question ${currentQuestionIndex + 1} / ${questions.length}`;
+            statsEl.textContent = `Score: ${score} / ${questionsAnsweredThisSession}`;
+        }
+
+        // Event Listeners
+        choiceAButton.addEventListener('click', () => checkAnswer('A'));
+        choiceBButton.addEventListener('click', () => checkAnswer('B'));
+        choiceCButton.addEventListener('click', () => checkAnswer('C'));
+        nextButton.addEventListener('click', nextQuestion);
+        prevButton.addEventListener('click', prevQuestion);
+        showAnswerButton.addEventListener('click', revealAnswer);
+
+        // Initialisation
+        loadQuestions();
+
+    </script>
+</body>
+</html>
