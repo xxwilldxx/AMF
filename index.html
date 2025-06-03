@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flashcards Révision AMF</title>
     <style>
-        /* ... (votre CSS existant) ... */
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
             display: flex;
@@ -194,7 +193,7 @@
         <div id="review-mode-active-message" class="hidden">Mode Révision Actif (Questions incorrectes)</div>
         <div class="mode-controls">
             <button id="review-wrong-answers-btn">Réviser les erreurs (<span id="wrong-answers-count">0</span>)</button>
-            <button id="reset-wrong-answers-btn">Réinitialiser la liste d'erreurs</button>
+            <button id="reset-wrong-answers-btn">Réinitialiser la session</button>
             <button id="back-to-full-quiz-btn" class="hidden">Retour au Quiz Complet</button>
         </div>
         <div id="flashcard-container">
@@ -232,7 +231,7 @@
 
     <script>
         let originalQuestions = [];
-        let questions = []; // Deviendra le set de questions pour la session en cours
+        let questions = [];
         let currentQuestionIndex = 0;
         let score = 0;
         let questionsAnsweredThisSession = 0;
@@ -241,9 +240,8 @@
         let isReviewMode = false;
 
         const WRONG_ANSWERS_STORAGE_KEY = 'amfFlashcardsWrongAnswers';
-        const QUIZ_STATE_KEY = 'amfFlashcardsQuizState'; // Nouvelle clé pour l'état du quiz
+        const QUIZ_STATE_KEY = 'amfFlashcardsQuizState';
 
-        // Elements
         const quizViewEl = document.getElementById('quiz-view');
         const questionIdEl = document.getElementById('question-id');
         const questionEl = document.getElementById('question');
@@ -267,10 +265,11 @@
         const modeControlsEl = document.querySelector('.mode-controls');
         const choiceButtons = [choiceAButton, choiceBButton, choiceCButton];
 
-        // --- Fonctions de gestion de l'état du Quiz ---
         function saveQuizState() {
+            // MODIFICATION: Ne pas sauvegarder l'état si on est en mode révision pour préserver l'état du quiz complet
+            if (isReviewMode) return;
+
             if (!resultsViewEl.classList.contains('hidden') || (questions.length === 0 && quizViewEl.classList.contains('hidden'))) {
-                // Ne pas sauvegarder si quiz terminé ou pas de session active
                 return;
             }
             const state = {
@@ -278,7 +277,7 @@
                 score,
                 questionsAnsweredThisSession,
                 isReviewMode,
-                currentQuestionsSet: questions, // Sauvegarde le set de questions actuel
+                currentQuestionsSet: questions,
                 answeredCurrentQuestion,
                 feedbackText: feedbackEl.textContent,
                 feedbackClass: feedbackEl.className
@@ -295,8 +294,8 @@
             currentQuestionIndex = savedState.currentQuestionIndex;
             score = savedState.score;
             questionsAnsweredThisSession = savedState.questionsAnsweredThisSession;
-            isReviewMode = savedState.isReviewMode;
-            questions = savedState.currentQuestionsSet; // Restaure le set de questions
+            isReviewMode = savedState.isReviewMode; // Sera false si on restaure un quiz complet
+            questions = savedState.currentQuestionsSet;
             answeredCurrentQuestion = savedState.answeredCurrentQuestion;
             feedbackEl.textContent = savedState.feedbackText;
             feedbackEl.className = savedState.feedbackClass;
@@ -309,14 +308,13 @@
             if (questions.length > 0) {
                 noReviewQuestionsMessageEl.classList.add('hidden');
             }
-            updateWrongAnswersUI(); // Mettre à jour le compteur d'erreurs au cas où
+            updateWrongAnswersUI();
         }
 
         function clearQuizState() {
             localStorage.removeItem(QUIZ_STATE_KEY);
         }
 
-        // --- Fonctions existantes modifiées ou nouvelles ---
         function loadWrongAnswerIds() {
             const storedWrongAnswers = localStorage.getItem(WRONG_ANSWERS_STORAGE_KEY);
             wrongAnswerIds = storedWrongAnswers ? JSON.parse(storedWrongAnswers) : [];
@@ -355,25 +353,26 @@
             }
 
             const savedState = loadQuizState();
-            if (savedState) {
+            if (savedState && !isReviewMode) { // On ne restaure que si on n'est pas explicitement en train de forcer un mode (ex: retour du mode révision)
                 restoreQuizState(savedState);
                 if (questions.length > 0) {
                     loadingMessageEl.classList.add('hidden');
                     quizViewEl.classList.remove('hidden');
                     resultsViewEl.classList.add('hidden');
                     modeControlsEl.classList.remove('hidden');
-                    displayQuestion(); // Affichera la question restaurée
-                } else { // État sauvegardé mais pas de questions (ex: mode révision vide restauré)
+                    displayQuestion();
+                } else {
                     loadingMessageEl.classList.add('hidden');
-                    loadQuestionsAndStart(isReviewMode); // Gère "pas de questions à réviser"
+                    loadQuestionsAndStart(isReviewMode); // Gère "pas de questions à réviser" ou quiz vide
                 }
             } else {
-                loadQuestionsAndStart(false); // Démarrage normal, quiz complet
+                 // Si isReviewMode est true ici (venant du bouton "Retour au quiz"), on force un nouveau quiz complet si pas d'état.
+                // Si isReviewMode est false, on commence un nouveau quiz complet.
+                loadQuestionsAndStart(false);
             }
         }
 
         async function loadQuestionsAndStart(review = false) {
-            // Réinitialiser l'état pour une nouvelle session
             currentQuestionIndex = 0;
             score = 0;
             questionsAnsweredThisSession = 0;
@@ -388,7 +387,6 @@
             modeControlsEl.classList.add('hidden');
 
             if (originalQuestions.length === 0) {
-                // Normalement géré par initializeApp, mais sécurité
                 console.error("originalQuestions est vide dans loadQuestionsAndStart.");
                 loadingMessageEl.textContent = "Erreur: Données de base non chargées.";
                 loadingMessageEl.classList.remove('hidden');
@@ -397,7 +395,7 @@
             }
             modeControlsEl.classList.remove('hidden');
 
-            isReviewMode = review;
+            isReviewMode = review; // Détermine le mode pour cette session
             reviewModeActiveMessageEl.classList.toggle('hidden', !isReviewMode);
             backToFullQuizBtn.classList.toggle('hidden', !isReviewMode);
             reviewWrongAnswersBtn.classList.toggle('hidden', isReviewMode);
@@ -409,12 +407,11 @@
                     noReviewQuestionsMessageEl.textContent = "Aucune question incorrecte à réviser.";
                     noReviewQuestionsMessageEl.classList.remove('hidden');
                     loadingMessageEl.classList.add('hidden');
-                    // S'assurer que les boutons de mode principal sont corrects
                     reviewWrongAnswersBtn.classList.remove('hidden');
                     resetWrongAnswersBtn.classList.remove('hidden');
                     backToFullQuizBtn.classList.add('hidden');
                     reviewModeActiveMessageEl.classList.add('hidden');
-                    clearQuizState(); // Pas de session à sauvegarder
+                    // Ne pas appeler clearQuizState ici, car cela effacerait un quiz complet en cours
                     return;
                 }
             } else {
@@ -425,11 +422,11 @@
             if (questions && questions.length > 0) {
                 loadingMessageEl.classList.add('hidden');
                 quizViewEl.classList.remove('hidden');
-                displayQuestion(); // Ceci appellera saveQuizState
-            } else if (!isReviewMode) { // Ne devrait pas arriver si originalQuestions est chargé
+                displayQuestion();
+            } else if (!isReviewMode) {
                 loadingMessageEl.textContent = "Aucune question trouvée.";
                 loadingMessageEl.classList.remove('hidden');
-                clearQuizState();
+                if (!isReviewMode) clearQuizState(); // Effacer l'état seulement si c'est un quiz complet qui est vide
             }
         }
 
@@ -442,7 +439,7 @@
 
         function displayQuestion() {
             if (quizViewEl.classList.contains('hidden') && questions.length > 0) {
-                 quizViewEl.classList.remove('hidden'); // Ensure view is visible if we have questions
+                 quizViewEl.classList.remove('hidden');
             }
 
             if (currentQuestionIndex >= questions.length) {
@@ -457,25 +454,36 @@
             choiceBButton.innerHTML = `B) ${q.choices.B}`;
             choiceCButton.innerHTML = `C) ${q.choices.C}`;
 
-            // Gérer l'état des boutons et du feedback basé sur answeredCurrentQuestion
             if (!answeredCurrentQuestion) {
                 choiceButtons.forEach(button => {
-                    button.className = ''; // Clear previous correct/incorrect states
+                    button.className = '';
                     button.classList.remove('disabled');
                 });
                 showAnswerButton.style.display = 'inline-block';
-                // feedbackEl est déjà géré par next/prev ou restauration
+                // feedbackEl.textContent = ""; // Géré par next/prev ou restauration
+                // feedbackEl.className = 'feedback';
             } else {
-                // La question a déjà été répondue (état restauré ou navigation)
-                // Le feedback (texte et classe) est déjà restauré/maintenu.
-                // Il suffit de désactiver les boutons.
                 showAnswerButton.style.display = 'none';
-                choiceButtons.forEach(button => {
-                    button.classList.add('disabled');
-                    // Pour restaurer les couleurs exactes (vert/rouge), il faudrait sauvegarder
-                    // la réponse donnée et la réponse correcte, puis réappliquer la logique de coloration.
-                    // Pour l'instant, le feedback textuel suffira.
-                });
+                choiceButtons.forEach(button => button.classList.add('disabled'));
+                // Le feedback (texte et classe) est déjà restauré par restoreQuizState ou défini par checkAnswer/revealAnswer
+                 // Si on voulait réappliquer les couleurs aux boutons :
+                const qRestored = questions[currentQuestionIndex];
+                if (qRestored) {
+                    if (feedbackEl.className.includes('correct-feedback')) {
+                        const correctButton = document.querySelector(`.choices button[data-choice="${qRestored.correctAnswer}"]`);
+                        if (correctButton) correctButton.classList.add('correct');
+                    } else if (feedbackEl.className.includes('incorrect-feedback')) {
+                        // Pour 'incorrect' on aurait besoin de la 'userSelectedChoice'
+                        // Pour 'revealed-correct' on peut:
+                        const correctButton = document.querySelector(`.choices button[data-choice="${qRestored.correctAnswer}"]`);
+                        if (correctButton) correctButton.classList.add('revealed-correct');
+                        // Si une réponse avait été sélectionnée, on pourrait la marquer 'incorrect'.
+                        // Ex: if (savedState.userSelectedChoice) {
+                        //    const selectedBtn = document.querySelector(`.choices button[data-choice="${savedState.userSelectedChoice}"]`);
+                        //    if (selectedBtn && qRestored.correctAnswer !== savedState.userSelectedChoice) selectedBtn.classList.add('incorrect');
+                        // }
+                    }
+                }
             }
 
             nextButton.textContent = "Suivante";
@@ -484,7 +492,7 @@
             if (currentQuestionIndex === questions.length - 1) {
                 nextButton.textContent = isReviewMode ? "Terminer la Révision" : "Voir le score final";
             }
-            saveQuizState(); // Sauvegarder l'état après chaque affichage
+            saveQuizState();
         }
 
         function checkAnswer(selectedChoice) {
@@ -553,22 +561,18 @@
         function showFinalScore() {
             quizViewEl.classList.add('hidden');
             resultsViewEl.classList.remove('hidden');
-            reviewModeActiveMessageEl.classList.add('hidden'); // Cacher message mode révision
+            reviewModeActiveMessageEl.classList.add('hidden');
 
             let totalForScore = questions.length;
-            if (totalForScore === 0) totalForScore = 1; // Éviter division par zéro
+            if (totalForScore === 0) totalForScore = 1;
             const percentage = ((score / totalForScore) * 100).toFixed(1);
 
             let messageHTML = `<h1>Session Terminée !</h1>
                            <p>Votre score : ${score} / ${totalForScore} (${percentage}%)</p>`;
             if (isReviewMode) {
                 messageHTML += `<button onclick="exitReviewModeAndRestart()">Recommencer le Quiz Complet</button>`;
-                if (questions.length > 0 && wrongAnswerIds.length > 0) { // Si le set de révision avait des questions
-                     const remainingWrongInReview = questions.filter(q => !q.answeredCorrectlyInReview).length; // Nécessiterait un suivi plus fin
-                     // Pour l'instant, on se base sur wrongAnswerIds global
-                     if (wrongAnswerIds.length > 0) {
-                         messageHTML += `<button onclick="startReview()">Réviser à nouveau les erreurs (${wrongAnswerIds.length})</button>`;
-                     }
+                 if (wrongAnswerIds.length > 0) {
+                    messageHTML += `<button onclick="startReview()">Réviser à nouveau les erreurs (${wrongAnswerIds.length})</button>`;
                 }
             } else {
                 messageHTML += `<button onclick="restartQuiz()">Recommencer une nouvelle session</button>`;
@@ -578,21 +582,23 @@
             }
             resultsViewEl.innerHTML = messageHTML;
 
-            // S'assurer que les boutons de mode corrects sont visibles à la fin
             if (isReviewMode) {
                 reviewWrongAnswersBtn.classList.remove('hidden');
                 resetWrongAnswersBtn.classList.remove('hidden');
                 backToFullQuizBtn.classList.add('hidden');
             }
 
-            clearQuizState(); // La session est finie, on efface l'état
+            // MODIFICATION: N'effacer l'état que si on termine un quiz complet
+            if (!isReviewMode) {
+                clearQuizState();
+            }
         }
 
         function nextQuestion() {
             if (currentQuestionIndex < questions.length - 1) {
                 currentQuestionIndex++;
-                answeredCurrentQuestion = false; // Prépare pour la nouvelle question
-                feedbackEl.textContent = "";     // Efface le feedback précédent
+                answeredCurrentQuestion = false;
+                feedbackEl.textContent = "";
                 feedbackEl.className = "feedback";
                 displayQuestion();
             } else {
@@ -603,25 +609,34 @@
         function prevQuestion() {
             if (currentQuestionIndex > 0) {
                 currentQuestionIndex--;
-                answeredCurrentQuestion = false; // Permet de re-répondre ou de voir l'état sauvegardé si on y revient
-                feedbackEl.textContent = "";
-                feedbackEl.className = "feedback";
-                // Note: Si on veut que l'état "répondu" d'une question précédente persiste quand on navigue
-                // avec prev/next, il faudrait une logique plus complexe pour sauvegarder/restaurer l'état de chaque question.
-                // L'approche actuelle réinitialise la question quand on y navigue.
-                // Alternative: ne pas mettre answeredCurrentQuestion à false ici, et displayQuestion gèrera l'affichage.
-                // Pour la v1, laissons le reset.
+                // Pour restaurer l'état précédent de la question (répondue ou non)
+                // il faudrait récupérer cet état de `localStorage` ou d'une structure de données
+                // qui stocke l'état de chaque question.
+                // Simplification: on traite comme une nouvelle question, mais on pourrait chercher
+                // à restaurer l'état de 'answeredCurrentQuestion' et le feedback.
+                // Pour le moment, on réinitialise.
+                const savedState = loadQuizState();
+                if (savedState && savedState.currentQuestionsSet[currentQuestionIndex] && savedState.currentQuestionIndex === currentQuestionIndex && !isReviewMode) {
+                    // Si on a un état sauvegardé pour cette question précise (et qu'on n'est pas en mode révision)
+                    // On pourrait essayer de le réappliquer (plus complexe)
+                    // Pour l'instant, on reset juste la question
+                    answeredCurrentQuestion = savedState.answeredCurrentQuestion;
+                    feedbackEl.textContent = savedState.feedbackText;
+                    feedbackEl.className = savedState.feedbackClass;
+                } else {
+                    answeredCurrentQuestion = false;
+                    feedbackEl.textContent = "";
+                    feedbackEl.className = "feedback";
+                }
                 displayQuestion();
             }
         }
 
         function updateProgressAndStats() {
             progressEl.textContent = `Question ${Math.min(currentQuestionIndex + 1, questions.length)} / ${questions.length}`;
-            // Le score est basé sur les réponses données dans la session en cours (que ce soit le quiz complet ou la révision)
             let scoreDenominator = questionsAnsweredThisSession > 0 ? questionsAnsweredThisSession : questions.length;
-            if (questions.length === 0) scoreDenominator = 0; // Si pas de questions, score 0/0
+            if (questions.length === 0) scoreDenominator = 0;
             else if (questionsAnsweredThisSession === 0 && questions.length > 0) scoreDenominator = questions.length;
-
             statsEl.textContent = `Score: ${score} / ${scoreDenominator}`;
         }
 
@@ -631,13 +646,13 @@
         }
 
         function exitReviewModeAndRestart() {
-            clearQuizState();
-            isReviewMode = false; // Assurer la sortie du mode révision
-            loadQuestionsAndStart(false);
+            // clearQuizState(); // N'est pas nécessaire car initializeApp s'en chargera ou restaurera
+            isReviewMode = false;
+            initializeApp(); // Va essayer de charger un quiz complet sauvegardé ou en démarrer un nouveau
         }
 
         function startReview() {
-            clearQuizState(); // Commence une nouvelle session de révision
+            // MODIFICATION: Ne pas appeler clearQuizState() ici pour préserver l'état du quiz complet
             if (wrongAnswerIds.length > 0) {
                 loadQuestionsAndStart(true);
             } else {
@@ -654,23 +669,20 @@
 
         function resetWrongAnswers() {
             if (confirm("Êtes-vous sûr de vouloir réinitialiser la liste de vos réponses incorrectes ?")) {
-                clearQuizState(); // Efface aussi l'état du quiz en cours
+                clearQuizState();
                 wrongAnswerIds = [];
                 saveWrongAnswerIds();
-                isReviewMode = false; // Sortir du mode révision si actif
-                // Réinitialiser l'UI
+                isReviewMode = false;
                 reviewModeActiveMessageEl.classList.add('hidden');
                 backToFullQuizBtn.classList.add('hidden');
                 reviewWrongAnswersBtn.classList.remove('hidden');
                 resetWrongAnswersBtn.classList.remove('hidden');
                 noReviewQuestionsMessageEl.classList.add('hidden');
                 resultsViewEl.classList.add('hidden');
-
-                loadQuestionsAndStart(false); // Redémarre un quiz complet frais
+                loadQuestionsAndStart(false);
             }
         }
 
-        // Event Listeners
         choiceAButton.addEventListener('click', () => checkAnswer('A'));
         choiceBButton.addEventListener('click', () => checkAnswer('B'));
         choiceCButton.addEventListener('click', () => checkAnswer('C'));
@@ -679,15 +691,14 @@
         showAnswerButton.addEventListener('click', revealAnswer);
         reviewWrongAnswersBtn.addEventListener('click', startReview);
         resetWrongAnswersBtn.addEventListener('click', resetWrongAnswers);
+
+        // MODIFICATION: Comportement du bouton "Retour au Quiz Complet"
         backToFullQuizBtn.addEventListener('click', () => {
-            clearQuizState(); // Efface l'état de la session de révision
-            isReviewMode = false;
-            loadQuestionsAndStart(false);
+            isReviewMode = false; // Signaler qu'on n'est plus en mode révision
+            initializeApp();    // Tenter de restaurer le quiz complet ou démarrer un nouveau
         });
 
-        // Initialisation de l'application
         initializeApp();
-
     </script>
 </body>
 </html>
