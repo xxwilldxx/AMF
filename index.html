@@ -71,11 +71,11 @@
             transition: background-color 0.2s ease-in-out, transform 0.1s ease;
             text-align: left;
         }
-        .choices button:hover {
+        .choices button:hover:not(.disabled) {
             background-color: #0056b3;
             transform: translateY(-1px);
         }
-        .choices button:active {
+        .choices button:active:not(.disabled) {
             transform: translateY(0px);
         }
         .choices button.correct {
@@ -88,8 +88,8 @@
         }
         .choices button.revealed-correct {
             border: 2px solid #28a745;
-            background-color: #e9f7ef;
-            color: #28a745;
+            background-color: #e9f7ef !important; 
+            color: #28a745 !important;
         }
         .choices button.disabled {
             pointer-events: none;
@@ -112,7 +112,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            flex-wrap: wrap; /* Allow buttons to wrap on smaller screens */
+            flex-wrap: wrap; 
         }
         #navigation button, .mode-controls button, #results-view button {
             padding: 10px 18px;
@@ -157,18 +157,22 @@
             gap: 10px;
             flex-wrap: wrap;
         }
-        .mode-controls button {
+        .mode-controls button { /* Style général */
             background-color: #17a2b8;
         }
         .mode-controls button:hover {
             background-color: #138496;
         }
-        .mode-controls button#reset-wrong-answers-btn {
-            background-color: #dc3545;
+        /* Styles spécifiques pour les boutons de réinitialisation dans mode-controls */
+        .mode-controls button#reset-wrong-answers-btn, 
+        .mode-controls button#reset-full-quiz-btn {
+            background-color: #fd7e14; /* Orange pour se démarquer */
         }
-        .mode-controls button#reset-wrong-answers-btn:hover {
-            background-color: #c82333;
+        .mode-controls button#reset-wrong-answers-btn:hover,
+        .mode-controls button#reset-full-quiz-btn:hover {
+            background-color: #e66800;
         }
+
         #review-mode-active-message {
             color: #17a2b8;
             font-weight: bold;
@@ -178,9 +182,12 @@
             padding: 20px;
             text-align: center;
         }
-        #results-view button {
-            background-color: #007bff;
-            margin: 10px 5px;
+        #results-view p { /* Ajouter un peu d'espace pour les paragraphes dans la vue des résultats */
+            margin: 10px 0;
+        }
+        #results-view button { /* Boutons dans la vue des résultats */
+            background-color: #007bff; 
+            margin: 8px 5px; /* Un peu moins de marge verticale pour plus de boutons */
         }
         #results-view button:hover {
             background-color: #0056b3;
@@ -191,11 +198,14 @@
     <div class="container">
         <h1>Flashcards Révision AMF</h1>
         <div id="review-mode-active-message" class="hidden">Mode Révision Actif (Questions incorrectes)</div>
-        <div class="mode-controls">
+        
+        <div class="mode-controls"> <!-- Toujours visible sauf si explicitement caché -->
             <button id="review-wrong-answers-btn">Réviser les erreurs (<span id="wrong-answers-count">0</span>)</button>
-            <button id="reset-wrong-answers-btn">Réinitialiser la session</button>
-            <button id="back-to-full-quiz-btn" class="hidden">Retour au Quiz Complet</button>
+            <button id="reset-wrong-answers-btn">Réinitialiser la liste d'erreurs</button> 
+            <button id="reset-full-quiz-btn">Réinitialiser le Quiz Complet</button>
+            <button id="back-to-full-quiz-btn" class="hidden">Retour au Quiz Principal (Abandonner Révision)</button>
         </div>
+
         <div id="flashcard-container">
              <div id="quiz-view">
                 <div id="flashcard">
@@ -236,8 +246,10 @@
         let score = 0;
         let questionsAnsweredThisSession = 0;
         let answeredCurrentQuestion = false;
+        let userChoiceOnCurrentQuestion = null; 
         let wrongAnswerIds = [];
         let isReviewMode = false;
+        let correctedInReviewSessionIds = []; // NOUVEAU: Pour suivre les erreurs corrigées PENDANT la session de révision
 
         const WRONG_ANSWERS_STORAGE_KEY = 'amfFlashcardsWrongAnswers';
         const QUIZ_STATE_KEY = 'amfFlashcardsQuizState';
@@ -259,6 +271,7 @@
         const wrongAnswersCountEl = document.getElementById('wrong-answers-count');
         const reviewWrongAnswersBtn = document.getElementById('review-wrong-answers-btn');
         const resetWrongAnswersBtn = document.getElementById('reset-wrong-answers-btn');
+        const resetFullQuizBtn = document.getElementById('reset-full-quiz-btn');
         const backToFullQuizBtn = document.getElementById('back-to-full-quiz-btn');
         const reviewModeActiveMessageEl = document.getElementById('review-mode-active-message');
         const noReviewQuestionsMessageEl = document.getElementById('no-review-questions-message');
@@ -266,23 +279,18 @@
         const choiceButtons = [choiceAButton, choiceBButton, choiceCButton];
 
         function saveQuizState() {
-            // MODIFICATION: Ne pas sauvegarder l'état si on est en mode révision pour préserver l'état du quiz complet
             if (isReviewMode) return;
-
-            if (!resultsViewEl.classList.contains('hidden') || (questions.length === 0 && quizViewEl.classList.contains('hidden'))) {
-                return;
+            if (!quizViewEl.classList.contains('hidden') && questions.length > 0 && resultsViewEl.classList.contains('hidden')) {
+                const state = {
+                    currentQuestionIndex, score, questionsAnsweredThisSession,
+                    currentQuestionsSet: questions.map(q => q.id),
+                    answeredCurrentQuestion,
+                    feedbackText: feedbackEl.textContent,
+                    feedbackClass: feedbackEl.className,
+                    userChoiceOnCurrentQuestion
+                };
+                localStorage.setItem(QUIZ_STATE_KEY, JSON.stringify(state));
             }
-            const state = {
-                currentQuestionIndex,
-                score,
-                questionsAnsweredThisSession,
-                isReviewMode,
-                currentQuestionsSet: questions,
-                answeredCurrentQuestion,
-                feedbackText: feedbackEl.textContent,
-                feedbackClass: feedbackEl.className
-            };
-            localStorage.setItem(QUIZ_STATE_KEY, JSON.stringify(state));
         }
 
         function loadQuizState() {
@@ -294,20 +302,17 @@
             currentQuestionIndex = savedState.currentQuestionIndex;
             score = savedState.score;
             questionsAnsweredThisSession = savedState.questionsAnsweredThisSession;
-            isReviewMode = savedState.isReviewMode; // Sera false si on restaure un quiz complet
-            questions = savedState.currentQuestionsSet;
+            if (originalQuestions.length > 0 && savedState.currentQuestionsSet) {
+                 questions = savedState.currentQuestionsSet.map(id => originalQuestions.find(oq => oq.id === id)).filter(q => q);
+            } else {
+                questions = [];
+            }
             answeredCurrentQuestion = savedState.answeredCurrentQuestion;
             feedbackEl.textContent = savedState.feedbackText;
             feedbackEl.className = savedState.feedbackClass;
-
-            reviewModeActiveMessageEl.classList.toggle('hidden', !isReviewMode);
-            backToFullQuizBtn.classList.toggle('hidden', !isReviewMode);
-            reviewWrongAnswersBtn.classList.toggle('hidden', isReviewMode);
-            resetWrongAnswersBtn.classList.toggle('hidden', isReviewMode);
-
-            if (questions.length > 0) {
-                noReviewQuestionsMessageEl.classList.add('hidden');
-            }
+            userChoiceOnCurrentQuestion = savedState.userChoiceOnCurrentQuestion;
+            isReviewMode = false;
+            updateUiForCurrentMode();
             updateWrongAnswersUI();
         }
 
@@ -330,10 +335,27 @@
             wrongAnswersCountEl.textContent = wrongAnswerIds.length;
             reviewWrongAnswersBtn.disabled = wrongAnswerIds.length === 0;
         }
+        
+        function updateUiForCurrentMode() {
+            reviewModeActiveMessageEl.classList.toggle('hidden', !isReviewMode);
+            backToFullQuizBtn.classList.toggle('hidden', !isReviewMode);
+            // Les boutons de révision et de réinitialisation du quiz complet sont généralement visibles
+            // sauf si on est en mode révision actif (ils sont remplacés par "Retour au quiz")
+            reviewWrongAnswersBtn.classList.toggle('hidden', isReviewMode);
+            resetWrongAnswersBtn.classList.toggle('hidden', isReviewMode);
+            resetFullQuizBtn.classList.toggle('hidden', isReviewMode);
+
+             // Cacher modeControls si on est sur l'écran des résultats de la révision
+            if (!resultsViewEl.classList.contains('hidden') && isReviewMode) {
+                modeControlsEl.classList.add('hidden');
+            } else {
+                modeControlsEl.classList.remove('hidden');
+            }
+        }
+
 
         async function initializeApp() {
             loadWrongAnswerIds();
-
             if (originalQuestions.length === 0) {
                 try {
                     const response = await fetch('questions_amf.json');
@@ -343,90 +365,97 @@
                         throw new Error("Le fichier JSON est vide ou mal formaté.");
                     }
                 } catch (error) {
-                    console.error("Erreur critique lors du chargement du fichier JSON:", error);
-                    loadingMessageEl.textContent = `Erreur chargement questions: ${error.message}. Actualisez ou vérifiez le fichier.`;
-                    loadingMessageEl.classList.remove('hidden');
+                    console.error("Erreur critique:", error);
+                    loadingMessageEl.textContent = `Erreur chargement: ${error.message}.`;
                     modeControlsEl.classList.remove('hidden');
                     updateWrongAnswersUI();
                     return;
                 }
             }
-
+            
+            let intentToStartReview = isReviewMode; 
+            isReviewMode = false; 
             const savedState = loadQuizState();
-            if (savedState && !isReviewMode) { // On ne restaure que si on n'est pas explicitement en train de forcer un mode (ex: retour du mode révision)
+
+            if (savedState && !intentToStartReview) {
                 restoreQuizState(savedState);
                 if (questions.length > 0) {
-                    loadingMessageEl.classList.add('hidden');
-                    quizViewEl.classList.remove('hidden');
-                    resultsViewEl.classList.add('hidden');
-                    modeControlsEl.classList.remove('hidden');
+                    showQuizInterface();
                     displayQuestion();
                 } else {
-                    loadingMessageEl.classList.add('hidden');
-                    loadQuestionsAndStart(isReviewMode); // Gère "pas de questions à réviser" ou quiz vide
+                    clearQuizState(); 
+                    loadAndStartMainQuiz(); 
                 }
             } else {
-                 // Si isReviewMode est true ici (venant du bouton "Retour au quiz"), on force un nouveau quiz complet si pas d'état.
-                // Si isReviewMode est false, on commence un nouveau quiz complet.
-                loadQuestionsAndStart(false);
+                if (intentToStartReview) {
+                    loadAndStartReviewMode();
+                } else {
+                    loadAndStartMainQuiz();
+                }
             }
         }
-
-        async function loadQuestionsAndStart(review = false) {
+        
+        function resetQuizSessionVariables() {
             currentQuestionIndex = 0;
             score = 0;
             questionsAnsweredThisSession = 0;
             answeredCurrentQuestion = false;
+            userChoiceOnCurrentQuestion = null;
             feedbackEl.textContent = "";
             feedbackEl.className = "feedback";
-
-            loadingMessageEl.classList.remove('hidden');
-            quizViewEl.classList.add('hidden');
-            resultsViewEl.classList.add('hidden');
+            correctedInReviewSessionIds = []; // NOUVEAU: Réinitialiser ici
+            resultsViewEl.classList.add('hidden'); 
+            quizViewEl.classList.add('hidden'); 
+            loadingMessageEl.classList.remove('hidden'); 
             noReviewQuestionsMessageEl.classList.add('hidden');
-            modeControlsEl.classList.add('hidden');
+        }
 
-            if (originalQuestions.length === 0) {
-                console.error("originalQuestions est vide dans loadQuestionsAndStart.");
-                loadingMessageEl.textContent = "Erreur: Données de base non chargées.";
-                loadingMessageEl.classList.remove('hidden');
-                modeControlsEl.classList.remove('hidden');
-                return;
-            }
-            modeControlsEl.classList.remove('hidden');
+        function showQuizInterface() {
+            loadingMessageEl.classList.add('hidden');
+            quizViewEl.classList.remove('hidden');
+            resultsViewEl.classList.add('hidden'); // S'assurer que les résultats sont cachés
+            modeControlsEl.classList.remove('hidden'); // S'assurer que les contrôles principaux sont visibles
+            updateUiForCurrentMode();
+        }
+        
+        function loadAndStartMainQuiz() {
+            resetQuizSessionVariables();
+            isReviewMode = false;
+            if (originalQuestions.length === 0) { /* ... gestion erreur ... */ return; }
+            questions = [...originalQuestions]; 
+            shuffleArray(questions);
+            finalizeQuestionLoading();
+        }
 
-            isReviewMode = review; // Détermine le mode pour cette session
-            reviewModeActiveMessageEl.classList.toggle('hidden', !isReviewMode);
-            backToFullQuizBtn.classList.toggle('hidden', !isReviewMode);
-            reviewWrongAnswersBtn.classList.toggle('hidden', isReviewMode);
-            resetWrongAnswersBtn.classList.toggle('hidden', isReviewMode);
-
-            if (isReviewMode) {
-                questions = originalQuestions.filter(q => wrongAnswerIds.includes(q.id));
-                if (questions.length === 0) {
-                    noReviewQuestionsMessageEl.textContent = "Aucune question incorrecte à réviser.";
-                    noReviewQuestionsMessageEl.classList.remove('hidden');
-                    loadingMessageEl.classList.add('hidden');
-                    reviewWrongAnswersBtn.classList.remove('hidden');
-                    resetWrongAnswersBtn.classList.remove('hidden');
-                    backToFullQuizBtn.classList.add('hidden');
-                    reviewModeActiveMessageEl.classList.add('hidden');
-                    // Ne pas appeler clearQuizState ici, car cela effacerait un quiz complet en cours
-                    return;
-                }
-            } else {
-                questions = [...originalQuestions];
-                shuffleArray(questions);
-            }
-
-            if (questions && questions.length > 0) {
+        function loadAndStartReviewMode() {
+            resetQuizSessionVariables();
+            isReviewMode = true;
+            if (originalQuestions.length === 0) { /* ... gestion erreur ... */ return; }
+            questions = originalQuestions.filter(q => wrongAnswerIds.includes(q.id));
+            
+            if (questions.length === 0) {
+                noReviewQuestionsMessageEl.textContent = "Aucune question incorrecte à réviser.";
+                noReviewQuestionsMessageEl.classList.remove('hidden');
                 loadingMessageEl.classList.add('hidden');
-                quizViewEl.classList.remove('hidden');
+                isReviewMode = false; // Sortir du mode s'il n'y a rien à faire
+            }
+            finalizeQuestionLoading(); // Affichera le message si questions est vide
+        }
+        
+        function finalizeQuestionLoading() {
+            updateUiForCurrentMode();
+            if (questions.length > 0) {
+                showQuizInterface();
                 displayQuestion();
-            } else if (!isReviewMode) {
-                loadingMessageEl.textContent = "Aucune question trouvée.";
-                loadingMessageEl.classList.remove('hidden');
-                if (!isReviewMode) clearQuizState(); // Effacer l'état seulement si c'est un quiz complet qui est vide
+            } else { // Si questions est vide après filtrage (surtout pour le mode révision)
+                loadingMessageEl.classList.add('hidden'); // Cacher "Chargement"
+                if (isReviewMode) { // Message déjà affiché par loadAndStartReviewMode
+                     quizViewEl.classList.add('hidden'); // S'assurer que le quiz est caché
+                } else { // Quiz principal vide
+                    loadingMessageEl.textContent = "Aucune question trouvée pour le quiz.";
+                    loadingMessageEl.classList.remove('hidden');
+                    clearQuizState();
+                }
             }
         }
 
@@ -438,54 +467,38 @@
         }
 
         function displayQuestion() {
-            if (quizViewEl.classList.contains('hidden') && questions.length > 0) {
-                 quizViewEl.classList.remove('hidden');
-            }
-
             if (currentQuestionIndex >= questions.length) {
                 showFinalScore();
                 return;
             }
-
             const q = questions[currentQuestionIndex];
             questionIdEl.textContent = `Question n° ${q.id}`;
             questionEl.textContent = q.question;
             choiceAButton.innerHTML = `A) ${q.choices.A}`;
             choiceBButton.innerHTML = `B) ${q.choices.B}`;
             choiceCButton.innerHTML = `C) ${q.choices.C}`;
+            choiceButtons.forEach(button => { button.className = ''; });
 
-            if (!answeredCurrentQuestion) {
-                choiceButtons.forEach(button => {
-                    button.className = '';
-                    button.classList.remove('disabled');
-                });
-                showAnswerButton.style.display = 'inline-block';
-                // feedbackEl.textContent = ""; // Géré par next/prev ou restauration
-                // feedbackEl.className = 'feedback';
-            } else {
+            if (answeredCurrentQuestion) {
                 showAnswerButton.style.display = 'none';
                 choiceButtons.forEach(button => button.classList.add('disabled'));
-                // Le feedback (texte et classe) est déjà restauré par restoreQuizState ou défini par checkAnswer/revealAnswer
-                 // Si on voulait réappliquer les couleurs aux boutons :
-                const qRestored = questions[currentQuestionIndex];
-                if (qRestored) {
-                    if (feedbackEl.className.includes('correct-feedback')) {
-                        const correctButton = document.querySelector(`.choices button[data-choice="${qRestored.correctAnswer}"]`);
-                        if (correctButton) correctButton.classList.add('correct');
-                    } else if (feedbackEl.className.includes('incorrect-feedback')) {
-                        // Pour 'incorrect' on aurait besoin de la 'userSelectedChoice'
-                        // Pour 'revealed-correct' on peut:
-                        const correctButton = document.querySelector(`.choices button[data-choice="${qRestored.correctAnswer}"]`);
-                        if (correctButton) correctButton.classList.add('revealed-correct');
-                        // Si une réponse avait été sélectionnée, on pourrait la marquer 'incorrect'.
-                        // Ex: if (savedState.userSelectedChoice) {
-                        //    const selectedBtn = document.querySelector(`.choices button[data-choice="${savedState.userSelectedChoice}"]`);
-                        //    if (selectedBtn && qRestored.correctAnswer !== savedState.userSelectedChoice) selectedBtn.classList.add('incorrect');
-                        // }
+                const correctAnswer = q.correctAnswer;
+                const correctBtn = document.querySelector(`.choices button[data-choice="${correctAnswer}"]`);
+                if (userChoiceOnCurrentQuestion) {
+                    const selectedBtn = document.querySelector(`.choices button[data-choice="${userChoiceOnCurrentQuestion}"]`);
+                    if (selectedBtn) {
+                        selectedBtn.classList.add(userChoiceOnCurrentQuestion === correctAnswer ? 'correct' : 'incorrect');
                     }
+                    if (userChoiceOnCurrentQuestion !== correctAnswer && correctBtn) {
+                        correctBtn.classList.add('revealed-correct');
+                    }
+                } else { 
+                    if (correctBtn) correctBtn.classList.add('revealed-correct');
                 }
+            } else {
+                choiceButtons.forEach(button => button.classList.remove('disabled'));
+                showAnswerButton.style.display = 'inline-block';
             }
-
             nextButton.textContent = "Suivante";
             updateProgressAndStats();
             prevButton.disabled = currentQuestionIndex === 0;
@@ -498,11 +511,10 @@
         function checkAnswer(selectedChoice) {
             if (answeredCurrentQuestion) return;
             answeredCurrentQuestion = true;
+            userChoiceOnCurrentQuestion = selectedChoice;
             questionsAnsweredThisSession++;
-
             showAnswerButton.style.display = 'none';
             choiceButtons.forEach(button => button.classList.add('disabled'));
-
             const q = questions[currentQuestionIndex];
             const correctAnswer = q.correctAnswer;
             const correctButton = document.querySelector(`.choices button[data-choice="${correctAnswer}"]`);
@@ -513,19 +525,29 @@
                 feedbackEl.className = 'feedback correct-feedback';
                 selectedButton.classList.add('correct');
                 score++;
+                if (isReviewMode) { // NOUVEAU: Suivi des corrections en mode révision
+                    if (!correctedInReviewSessionIds.includes(q.id)) {
+                        correctedInReviewSessionIds.push(q.id);
+                    }
+                }
             } else {
                 feedbackEl.textContent = `Mauvaise réponse. La bonne réponse était ${correctAnswer}.`;
                 feedbackEl.className = 'feedback incorrect-feedback';
                 if (selectedButton) selectedButton.classList.add('incorrect');
                 if (correctButton) correctButton.classList.add('revealed-correct');
-
                 if (!isReviewMode && !wrongAnswerIds.includes(q.id)) {
                     wrongAnswerIds.push(q.id);
                     saveWrongAnswerIds();
                 }
+                if (isReviewMode) { // NOUVEAU: Si mal répondu en révision, retirer des corrigées
+                    const index = correctedInReviewSessionIds.indexOf(q.id);
+                    if (index > -1) {
+                        correctedInReviewSessionIds.splice(index, 1);
+                    }
+                }
             }
             updateProgressAndStats();
-             if (currentQuestionIndex === questions.length - 1) {
+            if (currentQuestionIndex === questions.length - 1) {
                 nextButton.textContent = isReviewMode ? "Terminer la Révision" : "Voir le score final";
             }
             saveQuizState();
@@ -534,22 +556,25 @@
         function revealAnswer() {
             if (answeredCurrentQuestion) return;
             answeredCurrentQuestion = true;
+            userChoiceOnCurrentQuestion = null;
             questionsAnsweredThisSession++;
-
             showAnswerButton.style.display = 'none';
             choiceButtons.forEach(button => button.classList.add('disabled'));
-
             const q = questions[currentQuestionIndex];
             const correctAnswer = q.correctAnswer;
-            const correctButton = document.querySelector(`.choices button[data-choice="${correctAnswer}"]`);
-
-            if (correctButton) correctButton.classList.add('revealed-correct');
+            const correctButtonDOM = document.querySelector(`.choices button[data-choice="${correctAnswer}"]`);
+            if (correctButtonDOM) correctButtonDOM.classList.add('revealed-correct');
             feedbackEl.textContent = `La bonne réponse est ${correctAnswer}. (Compté comme incorrect pour cette session)`;
             feedbackEl.className = 'feedback incorrect-feedback';
-
             if (!isReviewMode && !wrongAnswerIds.includes(q.id)) {
                 wrongAnswerIds.push(q.id);
                 saveWrongAnswerIds();
+            }
+            if (isReviewMode) { // NOUVEAU: Si révélé en révision, retirer des corrigées
+                const index = correctedInReviewSessionIds.indexOf(q.id);
+                if (index > -1) {
+                    correctedInReviewSessionIds.splice(index, 1);
+                }
             }
             updateProgressAndStats();
             if (currentQuestionIndex === questions.length - 1) {
@@ -561,43 +586,44 @@
         function showFinalScore() {
             quizViewEl.classList.add('hidden');
             resultsViewEl.classList.remove('hidden');
-            reviewModeActiveMessageEl.classList.add('hidden');
+            // reviewModeActiveMessageEl.classList.add('hidden'); // Est géré par updateUiForCurrentMode
 
             let totalForScore = questions.length;
             if (totalForScore === 0) totalForScore = 1;
             const percentage = ((score / totalForScore) * 100).toFixed(1);
-
             let messageHTML = `<h1>Session Terminée !</h1>
                            <p>Votre score : ${score} / ${totalForScore} (${percentage}%)</p>`;
+
             if (isReviewMode) {
-                messageHTML += `<button onclick="exitReviewModeAndRestart()">Recommencer le Quiz Complet</button>`;
-                 if (wrongAnswerIds.length > 0) {
-                    messageHTML += `<button onclick="startReview()">Réviser à nouveau les erreurs (${wrongAnswerIds.length})</button>`;
+                messageHTML += `<p>Vous avez correctement répondu à <strong>${correctedInReviewSessionIds.length}</strong> question(s) lors de cette révision.</p>`;
+                
+                if (correctedInReviewSessionIds.length > 0) {
+                    messageHTML += `<button onclick="handleValidateAndExitReview()">Valider les ${correctedInReviewSessionIds.length} erreur(s) corrigée(s) et retourner au quiz</button>`;
                 }
-            } else {
-                messageHTML += `<button onclick="restartQuiz()">Recommencer une nouvelle session</button>`;
+                
+                const remainingGlobalErrorsAfterPotentialValidation = wrongAnswerIds.filter(id => !correctedInReviewSessionIds.includes(id)).length;
+                if (remainingGlobalErrorsAfterPotentialValidation > 0 && correctedInReviewSessionIds.length > 0) {
+                     messageHTML += `<button onclick="handleValidateAndContinueReview()">Valider les corrections et réviser les ${remainingGlobalErrorsAfterPotentialValidation} erreurs restantes</button>`;
+                } else if (remainingGlobalErrorsAfterPotentialValidation > 0 && correctedInReviewSessionIds.length === 0) {
+                     messageHTML += `<button onclick="startNewReview()">Réviser à nouveau les ${remainingGlobalErrorsAfterPotentialValidation} erreurs</button>`;
+                }
+                 messageHTML += `<button onclick="handleExitReviewNoValidation()">Retourner au quiz principal (sans valider les corrections de cette session)</button>`;
+            } else { // Fin du quiz principal
+                messageHTML += `<button onclick="startMainQuizFresh()">Recommencer une nouvelle session</button>`;
                 if (wrongAnswerIds.length > 0) {
-                    messageHTML += `<button onclick="startReview()">Réviser les ${wrongAnswerIds.length} erreurs</button>`;
+                    messageHTML += `<button onclick="startNewReview()">Réviser les ${wrongAnswerIds.length} erreurs</button>`;
                 }
-            }
-            resultsViewEl.innerHTML = messageHTML;
-
-            if (isReviewMode) {
-                reviewWrongAnswersBtn.classList.remove('hidden');
-                resetWrongAnswersBtn.classList.remove('hidden');
-                backToFullQuizBtn.classList.add('hidden');
-            }
-
-            // MODIFICATION: N'effacer l'état que si on termine un quiz complet
-            if (!isReviewMode) {
                 clearQuizState();
             }
+            resultsViewEl.innerHTML = messageHTML;
+            updateUiForCurrentMode(); // Pour s'assurer que modeControls est bien caché si fin de révision
         }
 
         function nextQuestion() {
             if (currentQuestionIndex < questions.length - 1) {
                 currentQuestionIndex++;
                 answeredCurrentQuestion = false;
+                userChoiceOnCurrentQuestion = null;
                 feedbackEl.textContent = "";
                 feedbackEl.className = "feedback";
                 displayQuestion();
@@ -609,22 +635,15 @@
         function prevQuestion() {
             if (currentQuestionIndex > 0) {
                 currentQuestionIndex--;
-                // Pour restaurer l'état précédent de la question (répondue ou non)
-                // il faudrait récupérer cet état de `localStorage` ou d'une structure de données
-                // qui stocke l'état de chaque question.
-                // Simplification: on traite comme une nouvelle question, mais on pourrait chercher
-                // à restaurer l'état de 'answeredCurrentQuestion' et le feedback.
-                // Pour le moment, on réinitialise.
                 const savedState = loadQuizState();
-                if (savedState && savedState.currentQuestionsSet[currentQuestionIndex] && savedState.currentQuestionIndex === currentQuestionIndex && !isReviewMode) {
-                    // Si on a un état sauvegardé pour cette question précise (et qu'on n'est pas en mode révision)
-                    // On pourrait essayer de le réappliquer (plus complexe)
-                    // Pour l'instant, on reset juste la question
+                if (savedState && savedState.currentQuestionIndex === currentQuestionIndex && !isReviewMode) {
                     answeredCurrentQuestion = savedState.answeredCurrentQuestion;
+                    userChoiceOnCurrentQuestion = savedState.userChoiceOnCurrentQuestion;
                     feedbackEl.textContent = savedState.feedbackText;
                     feedbackEl.className = savedState.feedbackClass;
                 } else {
                     answeredCurrentQuestion = false;
+                    userChoiceOnCurrentQuestion = null;
                     feedbackEl.textContent = "";
                     feedbackEl.className = "feedback";
                 }
@@ -634,54 +653,86 @@
 
         function updateProgressAndStats() {
             progressEl.textContent = `Question ${Math.min(currentQuestionIndex + 1, questions.length)} / ${questions.length}`;
-            let scoreDenominator = questionsAnsweredThisSession > 0 ? questionsAnsweredThisSession : questions.length;
+            let scoreDenominator = questionsAnsweredThisSession > 0 ? questionsAnsweredThisSession : (questions.length > 0 ? questions.length : 1);
             if (questions.length === 0) scoreDenominator = 0;
-            else if (questionsAnsweredThisSession === 0 && questions.length > 0) scoreDenominator = questions.length;
             statsEl.textContent = `Score: ${score} / ${scoreDenominator}`;
         }
 
-        function restartQuiz() {
+        function startMainQuizFresh() {
             clearQuizState();
-            loadQuestionsAndStart(false);
-        }
-
-        function exitReviewModeAndRestart() {
-            // clearQuizState(); // N'est pas nécessaire car initializeApp s'en chargera ou restaurera
             isReviewMode = false;
-            initializeApp(); // Va essayer de charger un quiz complet sauvegardé ou en démarrer un nouveau
+            loadAndStartMainQuiz();
+        }
+        
+        function resetFullQuizAndRestart() {
+            if (confirm("Êtes-vous sûr de vouloir réinitialiser votre progression dans le quiz complet ?")) {
+                startMainQuizFresh(); // Réutilise la même logique
+            }
         }
 
-        function startReview() {
-            // MODIFICATION: Ne pas appeler clearQuizState() ici pour préserver l'état du quiz complet
+        function startNewReview() {
             if (wrongAnswerIds.length > 0) {
-                loadQuestionsAndStart(true);
+                loadAndStartReviewMode();
             } else {
                 noReviewQuestionsMessageEl.textContent = "Aucune question incorrecte à réviser.";
                 noReviewQuestionsMessageEl.classList.remove('hidden');
                 quizViewEl.classList.add('hidden');
                 resultsViewEl.classList.add('hidden');
-                reviewWrongAnswersBtn.classList.remove('hidden');
-                resetWrongAnswersBtn.classList.remove('hidden');
-                backToFullQuizBtn.classList.add('hidden');
-                reviewModeActiveMessageEl.classList.add('hidden');
+                isReviewMode = false; // S'assurer qu'on n'est pas en mode révision actif
+                updateUiForCurrentMode();
             }
         }
 
-        function resetWrongAnswers() {
-            if (confirm("Êtes-vous sûr de vouloir réinitialiser la liste de vos réponses incorrectes ?")) {
-                clearQuizState();
+        function resetWrongAnswersListOnly() {
+            if (confirm("Êtes-vous sûr de vouloir réinitialiser UNIQUEMENT la liste de vos réponses incorrectes ?\nVotre progression dans le quiz actuel sera conservée.")) {
                 wrongAnswerIds = [];
                 saveWrongAnswerIds();
-                isReviewMode = false;
-                reviewModeActiveMessageEl.classList.add('hidden');
-                backToFullQuizBtn.classList.add('hidden');
-                reviewWrongAnswersBtn.classList.remove('hidden');
-                resetWrongAnswersBtn.classList.remove('hidden');
-                noReviewQuestionsMessageEl.classList.add('hidden');
-                resultsViewEl.classList.add('hidden');
-                loadQuestionsAndStart(false);
+                if (isReviewMode) {
+                    isReviewMode = false; 
+                    noReviewQuestionsMessageEl.textContent = "Liste d'erreurs réinitialisée. Aucune erreur à réviser.";
+                    noReviewQuestionsMessageEl.classList.remove('hidden');
+                    quizViewEl.classList.add('hidden');
+                    resultsViewEl.classList.add('hidden');
+                }
+                updateUiForCurrentMode();
             }
         }
+        
+        // NOUVEAU: Fonctions pour gérer la validation à la fin de la révision
+        function applyCorrectionsFromSession() {
+            if (correctedInReviewSessionIds.length > 0) {
+                wrongAnswerIds = wrongAnswerIds.filter(id => !correctedInReviewSessionIds.includes(id));
+                saveWrongAnswerIds(); // Sauvegarder la liste d'erreurs mise à jour
+            }
+            correctedInReviewSessionIds = []; // Réinitialiser pour la prochaine session
+        }
+
+        function handleValidateAndExitReview() {
+            applyCorrectionsFromSession();
+            exitReviewToMainQuiz();
+        }
+
+        function handleValidateAndContinueReview() {
+            applyCorrectionsFromSession();
+            if (wrongAnswerIds.length > 0) {
+                startNewReview(); // Relancer une session de révision avec les erreurs restantes
+            } else {
+                alert("Félicitations ! Toutes les erreurs ont été corrigées.");
+                exitReviewToMainQuiz();
+            }
+        }
+
+        function handleExitReviewNoValidation() {
+            correctedInReviewSessionIds = []; // S'assurer qu'on ne valide rien par erreur
+            exitReviewToMainQuiz();
+        }
+
+        function exitReviewToMainQuiz() {
+            isReviewMode = false; // On quitte le mode révision
+            // Tenter de restaurer le quiz principal, sinon en démarrer un nouveau
+            initializeApp(); // initializeApp gérera la restauration ou le démarrage d'un quiz principal
+        }
+
 
         choiceAButton.addEventListener('click', () => checkAnswer('A'));
         choiceBButton.addEventListener('click', () => checkAnswer('B'));
@@ -689,13 +740,12 @@
         nextButton.addEventListener('click', nextQuestion);
         prevButton.addEventListener('click', prevQuestion);
         showAnswerButton.addEventListener('click', revealAnswer);
-        reviewWrongAnswersBtn.addEventListener('click', startReview);
-        resetWrongAnswersBtn.addEventListener('click', resetWrongAnswers);
-
-        // MODIFICATION: Comportement du bouton "Retour au Quiz Complet"
+        reviewWrongAnswersBtn.addEventListener('click', startNewReview);
+        resetWrongAnswersBtn.addEventListener('click', resetWrongAnswersListOnly);
+        resetFullQuizBtn.addEventListener('click', resetFullQuizAndRestart);
         backToFullQuizBtn.addEventListener('click', () => {
-            isReviewMode = false; // Signaler qu'on n'est plus en mode révision
-            initializeApp();    // Tenter de restaurer le quiz complet ou démarrer un nouveau
+            isReviewMode = false; 
+            initializeApp();      
         });
 
         initializeApp();
